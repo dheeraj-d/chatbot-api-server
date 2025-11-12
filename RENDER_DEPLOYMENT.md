@@ -75,7 +75,6 @@ git push -u origin main
    
    | Key | Value |
    |-----|-------|
-   | `GEMINI_API_KEY` | `AIzaSyD5lWbUfl39TBYzexDLYbvHkRIfGPyEWck` |
    | `PORT` | `3002` |
    | `NODE_ENV` | `production` |
 

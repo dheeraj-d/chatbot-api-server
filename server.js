@@ -173,6 +173,21 @@ function generateMirrorFallback(message) {
   return reply;
 }
 
+// Retry helper with exponential backoff
+async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      
+      const delay = baseDelay * Math.pow(2, i);
+      console.log(`Retry attempt ${i + 1}/${maxRetries} after ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, personality = "friendly" } = req.body;
@@ -216,33 +231,65 @@ app.post("/api/chat", async (req, res) => {
     let data;
 
     if (useGemini) {
-      // Google Gemini API
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [{ text: systemPrompt + "\n\nUser message: " + message }],
-              },
-            ],
-            generationConfig: {
-              temperature: temperature,
-              maxOutputTokens: 1024,
-            }
-          }),
+      // Google Gemini API with retry logic
+      const makeGeminiRequest = async () => {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [{ text: systemPrompt + "\n\nUser message: " + message }],
+                },
+              ],
+              generationConfig: {
+                temperature: temperature,
+                maxOutputTokens: 1024,
+              }
+            }),
+          }
+        );
+
+        const responseData = await response.json();
+
+        // Check for overload error and retry
+        if (!response.ok) {
+          const errorMessage = responseData.error?.message || '';
+          if (response.status === 429 || errorMessage.includes('overloaded') || errorMessage.includes('quota')) {
+            console.warn('⚠️  Gemini API overloaded, will retry...');
+            throw new Error('API_OVERLOAD');
+          }
+          throw new Error(errorMessage || "Gemini API error");
         }
-      );
 
-      data = await response.json();
+        return responseData;
+      };
 
-      if (!response.ok) {
-        return res.status(response.status).json({ 
-          error: data.error?.message || "Gemini API error" 
+      try {
+        data = await retryWithBackoff(makeGeminiRequest, 3, 1000);
+      } catch (error) {
+        if (error.message === 'API_OVERLOAD') {
+          return res.status(503).json({ 
+            error: "The AI service is currently overloaded. Please try again in a moment.",
+            retryable: true
+          });
+        }
+        
+        // Check for API key errors
+        const errorMsg = error.message.toLowerCase();
+        if (errorMsg.includes('api key') || errorMsg.includes('expired') || errorMsg.includes('invalid')) {
+          return res.status(401).json({ 
+            error: "API key expired or invalid. Please renew your Gemini API key at https://aistudio.google.com/app/apikey",
+            apiKeyError: true
+          });
+        }
+        
+        return res.status(500).json({ 
+          error: error.message || "Gemini API error" 
         });
       }
 

@@ -247,12 +247,6 @@ npm install
 | `GEMINI_API_KEY` | Google Gemini API key | - | ✅ Yes |
 | `PORT` | Server port number | 3002 | ❌ No |
 
-**Example:**
-```env
-GEMINI_API_KEY=AIzaSyD5lWbUfl39TBYzexDLYbvHkRIfGPyEWck
-PORT=3002
-```
-
 ### Frontend Configuration
 
 **File:** `frontend/src/app/chat/chat.component.ts`
